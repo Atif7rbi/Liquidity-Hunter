@@ -284,7 +284,7 @@ class PaperExecutor:
             )
             active = res.scalars().all()
 
-        max_age = timedelta(hours=4)  # PENDING expires after 4h
+        max_age = timedelta(hours=8)  # PENDING expires after 8h
         now = datetime.utcnow()
 
         for t in active:
@@ -293,24 +293,30 @@ class PaperExecutor:
                 continue
 
             if t.status == TradeStatus.PENDING.value:
-                # Cancel if missed entry
+                # ── Missed Entry Check ───────────────────────────────────
+                # LONG : فات الدخول لو السعر صعد فوق الزون
+                # SHORT: فات الدخول لو السعر نزل تحت الزون
                 missed = self.cfg["missed_entry_max_pct"]
                 if t.direction == TradeDirection.LONG.value:
                     if price > t.entry_zone_high * (1 + missed):
-                        await self.cancel(t.id, f"missed entry: price {price} ran above zone")
+                        await self.cancel(t.id, f"missed entry: price {price:.4g} ran above zone {t.entry_zone_high:.4g}")
                         continue
-                else:
+                else:  # SHORT
                     if price < t.entry_zone_low * (1 - missed):
-                        await self.cancel(t.id, f"missed entry: price {price} ran below zone")
+                        await self.cancel(t.id, f"missed entry: price {price:.4g} ran below zone {t.entry_zone_low:.4g}")
                         continue
-                # Expire after 4h
+
+                # ── Expiry ───────────────────────────────────────────────
                 if t.created_at and (now - t.created_at) > max_age:
-                    await self.cancel(t.id, "pending expired (>4h)")
+                    await self.cancel(t.id, "pending expired (>8h)")
                     continue
-                # Trigger if price entered zone (simple variant — main bot also checks confirmations)
+
+                # ── Auto-Trigger: price entered the entry zone ───────────
+                # الصفقة تتفعل فور دخول السعر منطقة الدخول
                 if t.entry_zone_low <= price <= t.entry_zone_high:
-                    # NOTE: full system requires trigger_confirm to gate this; here we just demo
-                    pass
+                    await self.trigger(t.id, price, confirmed_count=1)
+                    logger.info(f"⚡ AUTO-TRIGGERED {t.symbol} @ {price:.4g} (price entered zone)")
+                    continue
 
             elif t.status == TradeStatus.TRIGGERED.value:
                 # Check TP / SL

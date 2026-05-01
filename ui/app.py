@@ -210,6 +210,42 @@ def render_topbar(subtitle: str = "") -> None:
 
             ui.html("""<div class="status-pill"><div class="status-dot"></div> LIVE</div>""")
 
+            # ── Next Scan Countdown ──────────────────────────────────────
+            from src.core.config import settings as _s_cfg
+            from datetime import timezone as _tz
+            _scan_interval = int(_s_cfg.section("scanner").get("scan_interval_seconds", 300))
+            _countdown_el = ui.html("")
+
+            def _refresh_countdown():
+                _now = datetime.now(_tz.utc)
+                if bot.last_cycle_at:
+                    _last = bot.last_cycle_at
+                    if _last.tzinfo is None:
+                        _last = _last.replace(tzinfo=_tz.utc)
+                    elapsed   = (_now - _last).total_seconds()
+                    remaining = max(0, _scan_interval - int(elapsed))
+                else:
+                    remaining = _scan_interval
+                m2, s2 = divmod(remaining, 60)
+                if remaining > 60:
+                    clr = "var(--accent)"
+                elif remaining > 15:
+                    clr = "#f59e0b"
+                else:
+                    clr = "#ef4444"
+                _countdown_el.set_content(
+                    f"<div style='text-align:right;'>"
+                    f"<div style='font-size:11px;color:var(--text-faint);letter-spacing:.06em;"
+                    f"text-transform:uppercase;'>NEXT SCAN</div>"
+                    f"<div style='font-size:14px;font-weight:700;color:{clr};"
+                    f"font-family:var(--font-mono);'>{m2:02d}:{s2:02d}</div>"
+                    f"</div>"
+                )
+
+            _refresh_countdown()
+            ui.timer(1.0, _refresh_countdown)
+            # ─────────────────────────────────────────────────────────────
+
             ui.button("↻ Refresh", on_click=lambda: ui.navigate.reload()).props("flat").style(
                 "background:rgba(255,255,255,.06);color:var(--text-muted);"
                 "border:1px solid var(--border);border-radius:5px;"
@@ -570,7 +606,12 @@ async def page_trades() -> None:
         async with AsyncSessionLocal() as s:
             res    = await s.execute(
                 select(Trade)
-                .where(Trade.status.in_([TradeStatus.CLOSED_TP.value, TradeStatus.CLOSED_SL.value]))
+                .where(Trade.status.in_([
+                    TradeStatus.CLOSED_TP.value,
+                    TradeStatus.CLOSED_SL.value,
+                    TradeStatus.CANCELLED.value,
+                    TradeStatus.EXPIRED.value,
+                ]))
                 .order_by(desc(Trade.closed_at))
                 .limit(50)
             )
@@ -590,16 +631,24 @@ async def page_trades() -> None:
                 for t in closed:
                     pnl = t.pnl_usd or 0
                     cls = "text-success" if pnl > 0 else "text-danger"
+                    # Use real DB column names (actual_entry_price, not the dynamic alias entry_price)
+                    _entry  = t.actual_entry_price or (
+                        (t.entry_zone_low + t.entry_zone_high) / 2 if t.entry_zone_low else 0
+                    )
+                    _exit   = t.exit_price or 0
+                    _closed = t.closed_at
+                    _status_lbl = (t.status or "").replace("CLOSED_", "")
+                    _pill_cls   = "pill-long" if "TP" in (t.status or "") else "pill-short"
                     tbl += (
                         f"<tr>"
                         f"<td class='sym-cell'>{t.symbol}</td>"
                         f"<td>{direction_pill(t.direction)}</td>"
-                        f"<td><span class='pill pill-muted'>{t.status.replace('CLOSED_','')}</span></td>"
-                        f"<td class='mono'>{fmt_price(t.entry_price or 0)}</td>"
-                        f"<td class='mono'>{fmt_price(t.exit_price or 0)}</td>"
+                        f"<td><span class='pill {_pill_cls}'>{_status_lbl}</span></td>"
+                        f"<td class='mono'>{fmt_price(_entry)}</td>"
+                        f"<td class='mono'>{fmt_price(_exit)}</td>"
                         f"<td class='mono tabular-nums {cls}'>${pnl:+,.2f}</td>"
                         f"<td class='mono tabular-nums {cls}'>{(t.pnl_r or 0):+.2f}R</td>"
-                        f"<td class='mono text-muted'>{t.closed_at.strftime('%m/%d %H:%M') if t.closed_at else '—'}</td>"
+                        f"<td class='mono text-muted'>{_closed.strftime('%m/%d %H:%M') if _closed else '—'}</td>"
                         f"</tr>"
                     )
                 tbl += "</tbody></table></div>"

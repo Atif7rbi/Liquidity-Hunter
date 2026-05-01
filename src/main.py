@@ -220,6 +220,7 @@ async def main_cli() -> None:
     parser.add_argument("mode", choices=["bot", "backtest", "scan", "init"])
     parser.add_argument("--symbol", type=str, default="BTCUSDT")
     parser.add_argument("--days", type=int, default=60)
+    parser.add_argument("--timeframe", type=str, default="1h")
     args = parser.parse_args()
 
     await init_db()
@@ -236,7 +237,7 @@ async def main_cli() -> None:
 
     if args.mode == "backtest":
         engine = BacktestEngine()
-        stats = await engine.run(args.symbol, days=args.days)
+        stats = await engine.run(args.symbol, days=args.days, timeframe=args.timeframe)
         logger.info(f"Stats: {stats}")
         return
 

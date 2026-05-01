@@ -247,9 +247,9 @@ class BacktestEngine:
             trades=trades,
         )
 
-    async def run(self, symbol: str, days: int = 60) -> BacktestStats:
-        logger.info(f"Backtest: {symbol} over {days}d")
-        df = await self.fetch_history(symbol, days=days, interval="1h")
+    async def run(self, symbol: str, days: int = 60, timeframe: str = "1h") -> BacktestStats:
+        logger.info(f"Backtest: {symbol} over {days}d @ {timeframe}")
+        df = await self.fetch_history(symbol, days=days, interval=timeframe)
         if df.empty:
             return self.compute_stats([], symbol, days)
         trades = self._walk_forward(df, symbol)

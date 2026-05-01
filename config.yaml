@@ -72,17 +72,17 @@ trigger_confirmation:
 trade_generator:
   min_risk_reward_ratio: 2.0
   preferred_risk_reward_ratio: 2.5
-  entry_zone_width_pct: 0.003                # 0.3% range
+  entry_zone_width_pct: 0.015                # 0.3% range
   stop_buffer_pct: 0.002                     # 0.2% buffer beyond invalidation
 
 paper_executor:
   initial_capital_usd: 10_000
-  risk_per_trade_pct: 0.01                   # 1%
+  risk_per_trade_pct: 0.03                   # 1%
   max_concurrent_trades: 3
   slippage_entry_pct: 0.0005                 # 0.05%
   slippage_stop_pct: 0.001                   # 0.10% (worse on stops)
   spread_pct: 0.0002                         # 0.02% typical futures
-  missed_entry_max_pct: 0.003                # cancel if price runs > 0.3% past entry
+  missed_entry_max_pct: 0.03                # cancel if price runs > 3% past entry
 
   # Daily kill-switch
   daily_max_loss_pct: 0.05                   # stop after 5% daily loss
@@ -107,8 +107,8 @@ ui:
 
 learning:
   enabled: true
-  rolling_window: 50
-  min_sample_size: 50
-  adapt_every_n_trades: 10
+  rolling_window: 30
+  min_sample_size: 10
+  adapt_every_n_trades: 5
   disabled_setup_regimes: []
   setup_threshold_overrides: {}
