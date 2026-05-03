@@ -17,6 +17,7 @@ from src.core.database import (
     init_db,
 )
 from src.core.logger import logger
+from src.alerts.telegram_bot import TelegramAlerter
 from src.layers.paper_executor import PaperExecutor
 from src.main import LiquidityHunterBot
 from ui.components.widgets import (
@@ -44,11 +45,7 @@ executor      = PaperExecutor()
 _running_lock = asyncio.Lock()
 _uptime_start = datetime.now()
 
-# Scan state — updated during every cycle (manual + background)
 _scan_state: dict = {"step": 0, "counts": {}}
-
-# Version counter — increments after every completed cycle.
-# UI pages compare against this to know when to auto-refresh.
 _scan_version: int = 0
 
 
@@ -57,7 +54,6 @@ _scan_version: int = 0
 # ══════════════════════════════════════
 
 def _safe_notify(message: str, **kwargs) -> None:
-    """ui.notify — silently ignored if the browser tab is gone."""
     try:
         ui.notify(message, **kwargs)
     except Exception:
@@ -72,7 +68,6 @@ def _uptime_str() -> str:
 
 
 def _build_progress_html() -> str:
-    """Build live sidebar progress HTML — called every second via ui.timer."""
     step   = _scan_state.get("step", 0)
     counts = _scan_state.get("counts", {})
     steps  = ["Fetch", "Quality", "Volume", "OI", "Done"]
@@ -138,7 +133,7 @@ async def trigger_scan_now() -> None:
                 "oi":       getattr(diag, "passed_oi",        0),
                 "final":    getattr(diag, "final_shortlist",  0),
             } if diag else {}
-            _scan_version += 1          # ← triggers auto-refresh on all pages
+            _scan_version += 1
             new = result.get("new_setups", 0)
             _safe_notify(f"✅ Scan done — {new} new setup{'s' if new != 1 else ''}", type="positive")
         except Exception as e:
@@ -177,7 +172,6 @@ def render_sidebar(active: str) -> None:
               </div></a>""")
         ui.html("</div>")
 
-        # Live progress — updates every second
         ui.html("<div class='sidebar-section'><div class='sidebar-label'>Last Scan</div>")
         prog_el = ui.html(_build_progress_html())
         ui.timer(1.0, lambda: prog_el.set_content(_build_progress_html()))
@@ -197,7 +191,6 @@ def render_topbar(subtitle: str = "") -> None:
           </div>
         """)
         with ui.row().classes("items-center gap-3"):
-            # Live uptime — updates every second
             uptime_el = ui.html("")
             def _refresh_uptime():
                 uptime_el.set_content(f"""
@@ -210,7 +203,6 @@ def render_topbar(subtitle: str = "") -> None:
 
             ui.html("""<div class="status-pill"><div class="status-dot"></div> LIVE</div>""")
 
-            # ── Next Scan Countdown ──────────────────────────────────────
             from src.core.config import settings as _s_cfg
             from datetime import timezone as _tz
             _scan_interval = int(_s_cfg.section("scanner").get("scan_interval_seconds", 300))
@@ -244,7 +236,6 @@ def render_topbar(subtitle: str = "") -> None:
 
             _refresh_countdown()
             ui.timer(1.0, _refresh_countdown)
-            # ─────────────────────────────────────────────────────────────
 
             ui.button("↻ Refresh", on_click=lambda: ui.navigate.reload()).props("flat").style(
                 "background:rgba(255,255,255,.06);color:var(--text-muted);"
@@ -302,11 +293,6 @@ def page_shell(page_title: str, subtitle: str = ""):
 # ══════════════════════════════════════
 
 def _auto_refresh_on_scan(interval: float = 6.0) -> None:
-    """
-    Attach a timer to the current page.
-    Reloads the page automatically when a new scan cycle completes.
-    interval: how often to check (seconds).
-    """
     seen_version = {"v": _scan_version}
 
     def _check():
@@ -324,10 +310,9 @@ def _auto_refresh_on_scan(interval: float = 6.0) -> None:
 @ui.page("/")
 async def page_overview() -> None:
     container = page_shell("Overview", "PORTFOLIO · RECENT ACTIVITY")
-    _auto_refresh_on_scan()            # ← auto-reload when scan finishes
+    _auto_refresh_on_scan()
 
     with container:
-        # ── KPIs ──
         equity     = await executor.get_equity()
         open_count = await executor.get_open_count()
         kill       = await executor.is_kill_switch_active()
@@ -379,7 +364,6 @@ async def page_overview() -> None:
         </div>
         """)
 
-        # ── Recent Setups ──
         with ui.element("div").classes("card"):
             last_str = bot.last_cycle_at.strftime("%H:%M:%S") if bot.last_cycle_at else "—"
             ui.html(
@@ -394,6 +378,8 @@ async def page_overview() -> None:
                 tbl += "<th>Symbol</th><th>Direction</th><th>Score</th><th>State</th><th>Regime</th><th>Funding</th><th>Volume 24h</th><th>Open Interest</th>"
                 tbl += "</tr></thead><tbody>"
                 for d in rows:
+                    vol = d.get('volume_24h_usd', 0)
+                    oi  = d.get('open_interest_usd', 0)
                     tbl += (
                         f"<tr>"
                         f"<td class='sym-cell'>{d['symbol']}</td>"
@@ -402,14 +388,13 @@ async def page_overview() -> None:
                         f"<td>{state_pill(d['state'])}</td>"
                         f"<td>{regime_pill(d['regime'])}</td>"
                         f"<td class='mono tabular-nums'>{d['funding_rate']*100:+.3f}%</td>"
-                        f"<td class='mono tabular-nums'>{fmt_money_short(d.get('volume_24h_usd',0))}</td>"
-                        f"<td class='mono tabular-nums'>{fmt_money_short(d.get('open_interest_usd',0))}</td>"
+                        f"<td class='mono tabular-nums'>{fmt_money_short(vol)}</td>"
+                        f"<td class='mono tabular-nums'>{fmt_money_short(oi)}</td>"
                         f"</tr>"
                     )
                 tbl += "</tbody></table></div>"
                 ui.html(tbl)
 
-        # ── Recent Closed Trades ──
         with ui.element("div").classes("card"):
             ui.html("<div class='card-title'>Recent Closed Trades</div>")
             async with AsyncSessionLocal() as s:
@@ -631,7 +616,6 @@ async def page_trades() -> None:
                 for t in closed:
                     pnl = t.pnl_usd or 0
                     cls = "text-success" if pnl > 0 else "text-danger"
-                    # Use real DB column names (actual_entry_price, not the dynamic alias entry_price)
                     _entry  = t.actual_entry_price or (
                         (t.entry_zone_low + t.entry_zone_high) / 2 if t.entry_zone_low else 0
                     )
@@ -809,6 +793,178 @@ async def page_settings() -> None:
                 ("Fee (taker)",           f"{bt.get('fee_pct', 0) * 100:.3f}%"),
             ])
 
+        # ══ [تعديل] زر إرسال التقرير إلى Telegram ══════════════════════
+        with ui.element("div").classes("card").style("margin-top:16px;"):
+            ui.html("<div class='card-title'>📤 Telegram Report</div>")
+            _status_el = ui.html(
+                "<div style='font-size:13px;color:var(--text-muted);margin-bottom:12px;'>"
+                "إرسال تقرير PDF شامل إلى Telegram يحتوي على ملخص الأداء وآخر الصفقات.</div>"
+            )
+
+            async def _send_report_clicked():
+                _status_el.set_content(
+                    "<div style='font-size:13px;color:var(--info);margin-bottom:12px;'>"
+                    "⏳ جاري إنشاء التقرير وإرساله…</div>"
+                )
+                ok = await generate_and_send_pdf_report()
+                if ok:
+                    _status_el.set_content(
+                        "<div style='font-size:13px;color:var(--accent);margin-bottom:12px;'>"
+                        "✅ تم إرسال التقرير بنجاح إلى Telegram!</div>"
+                    )
+                    _safe_notify("✅ Report sent to Telegram", type="positive")
+                else:
+                    _status_el.set_content(
+                        "<div style='font-size:13px;color:#ef4444;margin-bottom:12px;'>"
+                        "❌ فشل الإرسال — تحقق من إعدادات Telegram في config.</div>"
+                    )
+                    _safe_notify("❌ Send failed", type="negative")
+
+            ui.button("📤 Send Report to Telegram", on_click=_send_report_clicked).style(
+                "background:var(--accent);color:#000;font-weight:700;"
+                "font-size:14px;border-radius:5px;padding:6px 18px;border:none;"
+            )
+        # ════════════════════════════════════════════════════════════════
+
+
+# ══════════════════════════════════════
+#  [تعديل] PDF REPORT → TELEGRAM
+# ══════════════════════════════════════
+
+async def generate_and_send_pdf_report() -> bool:
+    """Build a PDF summary of current performance and send it via Telegram."""
+    import io
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors as rl_colors
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+
+    try:
+        equity     = await executor.get_equity()
+        open_count = await executor.get_open_count()
+        kill       = await executor.is_kill_switch_active()
+        initial    = executor.initial_capital
+        eq_pct     = (equity - initial) / initial * 100 if initial else 0
+
+        async with AsyncSessionLocal() as s:
+            res    = await s.execute(
+                select(Trade)
+                .where(Trade.status.in_([TradeStatus.CLOSED_TP.value, TradeStatus.CLOSED_SL.value]))
+                .order_by(desc(Trade.closed_at))
+                .limit(20)
+            )
+            closed = res.scalars().all()
+
+        wins      = [t for t in closed if (t.pnl_usd or 0) > 0]
+        losses    = [t for t in closed if (t.pnl_usd or 0) <= 0]
+        win_rate  = len(wins) / len(closed) * 100 if closed else 0.0
+        total_pnl = sum((t.pnl_usd or 0) for t in closed)
+        now_str   = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(buf, pagesize=A4,
+                                leftMargin=2*cm, rightMargin=2*cm,
+                                topMargin=2*cm, bottomMargin=2*cm)
+        styles  = getSampleStyleSheet()
+        title_s = ParagraphStyle("title", parent=styles["Title"], fontSize=18, spaceAfter=6)
+        sub_s   = ParagraphStyle("sub",   parent=styles["Normal"], fontSize=10,
+                                 textColor=rl_colors.gray, spaceAfter=12)
+        hdr_s   = ParagraphStyle("hdr",   parent=styles["Heading2"], fontSize=12,
+                                 spaceBefore=14, spaceAfter=6)
+
+        story = [
+            Paragraph("Liquidity Hunter — Report", title_s),
+            Paragraph(f"Generated: {now_str}  |  Paper Mode", sub_s),
+            Spacer(1, 0.3*cm),
+            Paragraph("Portfolio Summary", hdr_s),
+        ]
+
+        eq_sign  = "+" if eq_pct >= 0 else ""
+        pnl_sign = "+" if total_pnl >= 0 else ""
+        kpi_data = [
+            ["Metric", "Value"],
+            ["Equity",         f"${equity:,.0f}  ({eq_sign}{eq_pct:.2f}%)"],
+            ["Realized P/L",   f"${pnl_sign}{total_pnl:,.2f}"],
+            ["Win Rate",       f"{win_rate:.1f}%  ({len(wins)}W / {len(losses)}L)"],
+            ["Open Positions", str(open_count)],
+            ["Kill Switch",    "ARMED" if kill else "SAFE"],
+        ]
+        kpi_tbl = Table(kpi_data, colWidths=[6*cm, 10*cm])
+        kpi_tbl.setStyle(TableStyle([
+            ("BACKGROUND",     (0, 0), (-1, 0), rl_colors.HexColor("#1a1a2e")),
+            ("TEXTCOLOR",      (0, 0), (-1, 0), rl_colors.white),
+            ("FONTNAME",       (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE",       (0, 0), (-1, -1), 10),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+             [rl_colors.HexColor("#f9f9f9"), rl_colors.white]),
+            ("GRID",           (0, 0), (-1, -1), 0.4, rl_colors.HexColor("#cccccc")),
+            ("LEFTPADDING",    (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING",   (0, 0), (-1, -1), 8),
+            ("TOPPADDING",     (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING",  (0, 0), (-1, -1), 5),
+        ]))
+        story.append(kpi_tbl)
+        story.append(Spacer(1, 0.4*cm))
+
+        if closed:
+            story.append(Paragraph("Recent Closed Trades (last 20)", hdr_s))
+            trade_data = [["Symbol", "Status", "P/L ", "R", "Closed", "Dir"]]
+            for t in closed:
+                pnl = t.pnl_usd or 0
+                trade_data.append([
+                    t.symbol,
+                   
+                    (t.status or "").replace("CLOSED_", ""),
+                    f"${pnl:+,.2f}",
+                    f"{(t.pnl_r or 0):+.2f}R",
+                    t.closed_at.strftime("%m/%d %H:%M") if t.closed_at else "—",
+                    t.direction or "—",
+                ])
+            t_tbl = Table(trade_data, colWidths=[3.5*cm, 2*cm, 2*cm, 2*cm, 2.5*cm, 3.8*cm])
+            t_tbl.setStyle(TableStyle([
+                ("BACKGROUND",     (0, 0), (-1, 0), rl_colors.HexColor("#1a1a2e")),
+                ("TEXTCOLOR",      (0, 0), (-1, 0), rl_colors.white),
+                ("FONTNAME",       (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE",       (0, 0), (-1, -1), 9),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+                 [rl_colors.HexColor("#f9f9f9"), rl_colors.white]),
+                ("GRID",           (0, 0), (-1, -1), 0.3, rl_colors.HexColor("#cccccc")),
+                ("LEFTPADDING",    (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING",   (0, 0), (-1, -1), 6),
+                ("TOPPADDING",     (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING",  (0, 0), (-1, -1), 4),
+            ]))
+            story.append(t_tbl)
+
+        doc.build(story)
+        buf.seek(0)
+
+        import httpx
+        from src.core.config import settings as _cfg
+        token   = _cfg.env.telegram_bot_token
+        chat_id = _cfg.env.telegram_chat_id
+        if not token or not chat_id:
+            logger.warning("Telegram not configured — cannot send report")
+            return False
+
+        fname = f"Liquidity Hunter — Report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+        url   = f"https://api.telegram.org/bot{token}/sendDocument"
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                url,
+                data={"chat_id": chat_id,
+                      "caption": f"Liquidity Hunter Report\n{now_str}"},
+                files={"document": (fname, buf, "application/pdf")},
+            )
+            resp.raise_for_status()
+        logger.info(f"PDF report sent to Telegram: {fname}")
+        return True
+
+    except Exception as e:
+        logger.exception(f"generate_and_send_pdf_report failed: {e}")
+        return False
+
 
 # ══════════════════════════════════════
 #  BACKGROUND LOOP
@@ -819,7 +975,7 @@ async def _background_loop() -> None:
     from src.core.config import settings as _s
     global _scan_version
     interval = int(_s.section("scanner").get("scan_interval_seconds", 300))
-    await asyncio.sleep(5)          # let UI come up first
+    await asyncio.sleep(5)
     while True:
         try:
             async with _running_lock:
@@ -834,7 +990,7 @@ async def _background_loop() -> None:
                     "oi":       getattr(diag, "passed_oi",        0),
                     "final":    getattr(diag, "final_shortlist",  0),
                 } if diag else {}
-                _scan_version += 1      # ← triggers auto-refresh on all pages
+                _scan_version += 1
         except Exception as e:
             _scan_state["step"] = 0
             logger.exception(f"Background cycle failed: {e}")
