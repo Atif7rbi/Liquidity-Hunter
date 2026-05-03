@@ -1,6 +1,6 @@
 """Binance Futures public API client.
 
-Uses only public endpoints — no API keys required for paper trading.
+Uses only public endpoints â€” no API keys required for paper trading.
 Async via httpx for high throughput when scanning 200+ symbols.
 
 Note: If geo-blocked on Binance, swap base_url to a mirror or use OKX fallback.
@@ -122,7 +122,7 @@ class BinanceFuturesClient:
     async def taker_buy_sell_volume(
         self, symbol: str, period: str = "5m", limit: int = 30
     ) -> list:
-        """Aggregated taker buy/sell volume — useful for aggression direction."""
+        """Aggregated taker buy/sell volume â€” useful for aggression direction."""
         return await self._get(
             "/futures/data/takerlongshortRatio",
             params={"symbol": symbol, "period": period, "limit": limit},

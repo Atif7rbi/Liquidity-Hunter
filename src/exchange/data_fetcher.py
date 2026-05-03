@@ -1,4 +1,4 @@
-"""High-level data fetching helpers — combines multiple endpoints into normalized objects."""
+"""High-level data fetching helpers â€” combines multiple endpoints into normalized objects."""
 from __future__ import annotations
 
 import asyncio
@@ -58,7 +58,7 @@ def klines_to_df(klines: list) -> pd.DataFrame:
 
 
 async def fetch_all_tickers(client: BinanceFuturesClient) -> list[TickerSummary]:
-    """One call → 24h stats for all perpetual symbols."""
+    """One call â†’ 24h stats for all perpetual symbols."""
     raw = await client.ticker_24h()
     perpetuals = set(await client.all_perpetual_symbols())
     out: list[TickerSummary] = []
@@ -89,7 +89,7 @@ async def fetch_premium_index_all(client: BinanceFuturesClient) -> dict[str, dic
 async def fetch_full_snapshot(
     client: BinanceFuturesClient, symbol: str
 ) -> Optional[FullSnapshot]:
-    """Pull everything we need for one symbol — runs requests in parallel."""
+    """Pull everything we need for one symbol â€” runs requests in parallel."""
     try:
         results = await asyncio.gather(
             client.premium_index(symbol),

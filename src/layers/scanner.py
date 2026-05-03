@@ -1,10 +1,10 @@
-"""Layer 1 — Scanner.
+"""Layer 1 â€” Scanner.
 
 Scans ALL Binance Futures perpetuals, applies a layered filter:
-  Layer A: Symbol quality filter (new in v1.2) — must pass
-  Layer B: Base liquidity (volume + OI thresholds) — must pass
-  Layer C: Extremity signal (funding | L/S | OI change) — any one passes
-  Layer D: Rank by composite extremity score — keep top N
+  Layer A: Symbol quality filter (new in v1.2) â€” must pass
+  Layer B: Base liquidity (volume + OI thresholds) â€” must pass
+  Layer C: Extremity signal (funding | L/S | OI change) â€” any one passes
+  Layer D: Rank by composite extremity score â€” keep top N
 
 v1.2 changes:
   - Added _passes_symbol_quality() filter that rejects:
@@ -13,7 +13,7 @@ v1.2 changes:
       3. Symbols containing non-ASCII / non-English characters
       4. Test / rarely-used suffixes (_PERP, redundant USDT combos)
   - ScanDiagnostics: added `excluded_quality` counter for the new filter stage
-  - config.yaml: exclude_symbols list now only needs stablecoin base names —
+  - config.yaml: exclude_symbols list now only needs stablecoin base names â€”
     the numeric-prefix and non-ASCII rules are enforced in code automatically
 """
 from __future__ import annotations
@@ -35,7 +35,7 @@ from src.exchange.data_fetcher import fetch_all_tickers, fetch_premium_index_all
 # Symbol quality rules
 # ---------------------------------------------------------------------------
 
-# Stablecoins and fiat-pegged bases — always exclude
+# Stablecoins and fiat-pegged bases â€” always exclude
 _STABLE_BASES = {
     "USDC", "BUSD", "TUSD", "FDUSD", "DAI", "USDP", "FRAX",
     "SUSD", "LUSD", "GUSD", "USTC", "USDN", "USDJ", "USDX",
@@ -54,7 +54,7 @@ _CLEAN_BASE_RE = re.compile(r"^[A-Z0-9]+$")
 
 def _extract_base(symbol: str) -> str:
     """Return base asset from a USDT-margined symbol.
-    e.g. BTCUSDT → BTC, 1000PEPEUSDT → 1000PEPE
+    e.g. BTCUSDT â†’ BTC, 1000PEPEUSDT â†’ 1000PEPE
     """
     if symbol.endswith("USDT"):
         return symbol[:-4]
@@ -113,9 +113,9 @@ class ScanResult:
 
 @dataclass
 class ScanDiagnostics:
-    """Funnel stats — how many symbols passed each filter stage."""
+    """Funnel stats â€” how many symbols passed each filter stage."""
     total_symbols: int = 0
-    excluded_quality: int = 0      # v1.2: NEW — numeric prefix, stablecoin, non-ASCII
+    excluded_quality: int = 0      # v1.2: NEW â€” numeric prefix, stablecoin, non-ASCII
     passed_volume: int = 0
     passed_oi: int = 0
     passed_extremity: int = 0
@@ -255,8 +255,8 @@ class Scanner:
 
             diag.passed_volume = len(base_passed)
             logger.info(
-                f"Scanner funnel: {diag.total_symbols} total → "
-                f"{diag.excluded_quality} excluded (quality+stable+numeric) → "
+                f"Scanner funnel: {diag.total_symbols} total â†’ "
+                f"{diag.excluded_quality} excluded (quality+stable+numeric) â†’ "
                 f"{diag.passed_volume} passed volume"
             )
 
@@ -307,12 +307,12 @@ class Scanner:
             diag.final_shortlist = len(top)
 
             logger.info(
-                f"Scanner funnel: {diag.passed_volume} → {diag.passed_oi} OI → "
-                f"{diag.passed_extremity} extremity → {diag.final_shortlist} final"
+                f"Scanner funnel: {diag.passed_volume} â†’ {diag.passed_oi} OI â†’ "
+                f"{diag.passed_extremity} extremity â†’ {diag.final_shortlist} final"
             )
             for r in top:
                 logger.info(
-                    f"  → {r.symbol}: score={r.extremity_score:.1f} | "
+                    f"  â†’ {r.symbol}: score={r.extremity_score:.1f} | "
                     f"vol=${r.volume_24h_usd/1e6:.0f}M | "
                     f"OI=${r.open_interest_usd/1e6:.0f}M | "
                     f"reasons={','.join(r.reasons)}"
